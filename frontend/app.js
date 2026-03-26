@@ -9,8 +9,10 @@ const SHIELD_RADIUS = 18
 const CORE_SWIRL_COUNT = cpuCores <= 4 ? 1300 : 2300
 const CORE_ORBITAL_COUNT = cpuCores <= 4 ? 1200 : 2100
 const SHIELD_PARTICLE_COUNT = cpuCores <= 4 ? 1500 : 2600
+const COMET_COUNT = cpuCores <= 4 ? 420 : 760
 const TRAIL_COUNT = cpuCores <= 4 ? 750 : 1300
 const GOD_RAY_COUNT = cpuCores <= 4 ? 5 : 8
+const VOLUMETRIC_SHAFT_COUNT = cpuCores <= 4 ? 4 : 6
 const NATURAL_COLOR = new THREE.Color("#42d9ff")
 const CORE_SAFE_COLOR = new THREE.Color("#2fd5ff")
 const CORE_ALERT_COLOR = new THREE.Color("#ff244d")
@@ -101,6 +103,7 @@ scene.add(particles)
 const coreUniforms = {
   uTime: { value: 0 },
   uThreat: { value: 0 },
+  uSpike: { value: 0 },
   uColorSafe: { value: new THREE.Color("#0b1f33") },
   uColorAttack: { value: new THREE.Color("#5a0e1d") },
 }
@@ -112,18 +115,62 @@ const core = new THREE.Mesh(
     vertexShader: `
       uniform float uTime;
       uniform float uThreat;
-      varying float vWave;
+      uniform float uSpike;
+      varying float vNoise;
+      varying float vSpike;
       varying vec3 vNormalDir;
       varying vec3 vViewDir;
+
+      float hash(vec3 p) {
+        p = fract(p * 0.3183099 + vec3(0.1, 0.2, 0.3));
+        p *= 17.0;
+        return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+      }
+
+      float valueNoise(vec3 p) {
+        vec3 i = floor(p);
+        vec3 f = fract(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float n000 = hash(i + vec3(0.0, 0.0, 0.0));
+        float n100 = hash(i + vec3(1.0, 0.0, 0.0));
+        float n010 = hash(i + vec3(0.0, 1.0, 0.0));
+        float n110 = hash(i + vec3(1.0, 1.0, 0.0));
+        float n001 = hash(i + vec3(0.0, 0.0, 1.0));
+        float n101 = hash(i + vec3(1.0, 0.0, 1.0));
+        float n011 = hash(i + vec3(0.0, 1.0, 1.0));
+        float n111 = hash(i + vec3(1.0, 1.0, 1.0));
+        float nx00 = mix(n000, n100, f.x);
+        float nx10 = mix(n010, n110, f.x);
+        float nx01 = mix(n001, n101, f.x);
+        float nx11 = mix(n011, n111, f.x);
+        float nxy0 = mix(nx00, nx10, f.y);
+        float nxy1 = mix(nx01, nx11, f.y);
+        return mix(nxy0, nxy1, f.z);
+      }
+
+      float fbm(vec3 p) {
+        float v = 0.0;
+        float a = 0.5;
+        for (int i = 0; i < 4; i++) {
+          v += valueNoise(p) * a;
+          p = p * 2.02 + vec3(1.7, 9.2, 3.4);
+          a *= 0.5;
+        }
+        return v;
+      }
+
       void main() {
-        float n1 = sin((position.x + uTime * 1.5) * 3.3);
-        float n2 = sin((position.y - uTime * 1.2) * 4.2);
-        float n3 = sin((position.z + uTime * 1.8) * 5.1);
-        float wave = (n1 + n2 + n3) / 3.0;
-        float amp = 0.07 + uThreat * 0.24;
-        vec3 displaced = position + normal * wave * amp;
+        vec3 p = normalize(position) * 2.4;
+        float n = fbm(p + vec3(uTime * 0.65, -uTime * 0.4, uTime * 0.55));
+        float n2 = fbm(p * 2.1 - vec3(uTime * 1.2, uTime * 0.8, -uTime * 1.1));
+        float wave = (n - 0.5) * 2.0;
+        float spikeMask = pow(max(0.0, n2), 2.8);
+        float baseAmp = 0.16 + uThreat * 0.26;
+        float spikeAmp = spikeMask * (0.03 + uThreat * 0.55 + uSpike * 0.42);
+        vec3 displaced = position + normal * (wave * baseAmp + spikeAmp);
         vec4 worldPos = modelMatrix * vec4(displaced, 1.0);
-        vWave = wave;
+        vNoise = n;
+        vSpike = spikeMask;
         vNormalDir = normalize(normalMatrix * normal);
         vViewDir = normalize(cameraPosition - worldPos.xyz);
         gl_Position = projectionMatrix * viewMatrix * worldPos;
@@ -131,17 +178,20 @@ const core = new THREE.Mesh(
     `,
     fragmentShader: `
       uniform float uThreat;
+      uniform float uSpike;
       uniform vec3 uColorSafe;
       uniform vec3 uColorAttack;
-      varying float vWave;
+      varying float vNoise;
+      varying float vSpike;
       varying vec3 vNormalDir;
       varying vec3 vViewDir;
       void main() {
         float fresnel = pow(1.0 - max(dot(normalize(vNormalDir), normalize(vViewDir)), 0.0), 2.6);
-        float pulse = 0.55 + 0.45 * abs(vWave);
+        float pulse = 0.58 + 0.42 * abs(vNoise * 2.0 - 1.0);
         vec3 base = mix(uColorSafe, uColorAttack, uThreat * 0.9);
         vec3 glow = mix(vec3(0.12, 0.35, 0.55), vec3(0.75, 0.12, 0.22), uThreat);
-        vec3 color = base + glow * (fresnel * 1.25 + pulse * 0.35);
+        vec3 color = base + glow * (fresnel * 1.3 + pulse * 0.36);
+        color += vec3(1.0, 0.45, 0.2) * vSpike * (uThreat * 0.85 + uSpike * 0.55);
         gl_FragColor = vec4(color, 1.0);
       }
     `,
@@ -326,6 +376,9 @@ const shield = new THREE.Mesh(
         vec2 uv = vUv * vec2(26.0, 16.0);
         float cell = hexCell(uv + vec2(sin(uTime * 0.3) * 0.25, cos(uTime * 0.4) * 0.18));
         float edge = 1.0 - smoothstep(0.43, 0.53, cell);
+        vec2 hexId = floor(uv);
+        float chain = sin((hexId.x * 0.73 + hexId.y * 0.51) - uTime * 9.2) * 0.5 + 0.5;
+        float chainPulse = smoothstep(0.82, 1.0, chain);
         float dist = length((vUv - vec2(0.5, 0.5)) * vec2(1.2, 1.0));
         float revealMask = 1.0 - smoothstep(uReveal, uReveal + 0.13, dist);
         float shimmer = 0.55 + 0.45 * sin(uTime * 6.5 + vWorldPos.y * 1.5 + vWorldPos.x * 0.7);
@@ -337,8 +390,8 @@ const shield = new THREE.Mesh(
         vec3 color = mix(uColorA, uColorB, shimmer);
         color = mix(color, uAttackTint, uPulse * 0.75);
         vec3 prism = mix(vec3(0.25, 0.7, 1.0), vec3(1.0, 0.45, 0.72), radial * uPulse);
-        color += prism * (0.1 + scan * 0.32);
-        float alpha = edge * revealMask * uStrength * (0.55 + shimmer * 0.58 + glitch + impactWave + radial * 0.22);
+        color += prism * (0.1 + scan * 0.32 + chainPulse * 0.38);
+        float alpha = edge * revealMask * uStrength * (0.55 + shimmer * 0.58 + glitch + impactWave + radial * 0.22 + chainPulse * 0.3);
         if (alpha < 0.01) discard;
         gl_FragColor = vec4(color + uAttackTint * impactWave * 0.65, alpha);
       }
@@ -411,6 +464,32 @@ const trailLines = new THREE.LineSegments(
 )
 scene.add(trailLines)
 
+const cometCount = Math.min(COMET_COUNT, STAR_COUNT)
+const cometIndices = new Uint32Array(cometCount)
+for (let i = 0; i < cometCount; i += 1) {
+  cometIndices[i] = Math.floor((i / cometCount) * STAR_COUNT)
+}
+
+const cometGeometry = new THREE.CylinderGeometry(0.03, 0.14, 1.35, 6, 1, true)
+const cometMaterial = new THREE.MeshBasicMaterial({
+  color: "#9ff5ff",
+  transparent: true,
+  opacity: 0.8,
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+})
+const cometMesh = new THREE.InstancedMesh(cometGeometry, cometMaterial, cometCount)
+cometMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage)
+scene.add(cometMesh)
+
+const upAxis = new THREE.Vector3(0, 1, 0)
+const tmpDir = new THREE.Vector3(0, 1, 0)
+const tmpObj = new THREE.Object3D()
+const tmpQuat = new THREE.Quaternion()
+const cometColorNormal = new THREE.Color("#7cecff")
+const cometColorAttack = new THREE.Color("#ff5f88")
+const cometColorDefense = new THREE.Color("#ff7db3")
+
 const makeRayTexture = () => {
   const canvas = document.createElement("canvas")
   canvas.width = 64
@@ -454,6 +533,53 @@ if (rayTexture) {
   }
 }
 scene.add(godRayGroup)
+
+const makeShaftTexture = () => {
+  const canvas = document.createElement("canvas")
+  canvas.width = 64
+  canvas.height = 512
+  const ctx = canvas.getContext("2d")
+  if (!ctx) {
+    return null
+  }
+  const gradient = ctx.createLinearGradient(32, 0, 32, 512)
+  gradient.addColorStop(0.0, "rgba(190,245,255,0.0)")
+  gradient.addColorStop(0.18, "rgba(190,245,255,0.7)")
+  gradient.addColorStop(0.6, "rgba(130,225,255,0.18)")
+  gradient.addColorStop(1.0, "rgba(130,225,255,0.0)")
+  ctx.fillStyle = gradient
+  ctx.fillRect(0, 0, 64, 512)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.needsUpdate = true
+  return texture
+}
+
+const shaftTexture = makeShaftTexture()
+const volumetricGroup = new THREE.Group()
+const volumetricShafts = []
+if (shaftTexture) {
+  for (let i = 0; i < VOLUMETRIC_SHAFT_COUNT; i += 1) {
+    const shaft = new THREE.Mesh(
+      new THREE.ConeGeometry(1.5 + Math.random() * 0.9, 55 + Math.random() * 18, 22, 1, true),
+      new THREE.MeshBasicMaterial({
+        map: shaftTexture,
+        color: "#9af2ff",
+        transparent: true,
+        opacity: 0.16,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    )
+    shaft.position.set((Math.random() - 0.5) * 2.2, 2.5, (Math.random() - 0.5) * 2.2)
+    shaft.rotation.x = Math.PI / 2
+    shaft.userData.twist = Math.random() * Math.PI * 2
+    shaft.userData.offset = new THREE.Vector3((Math.random() - 0.5) * 5, (Math.random() - 0.5) * 3, (Math.random() - 0.5) * 5)
+    volumetricGroup.add(shaft)
+    volumetricShafts.push(shaft)
+  }
+}
+scene.add(volumetricGroup)
 
 const hud = {
   state: document.getElementById("hud-state"),
@@ -1468,8 +1594,46 @@ const animate = () => {
   trailGeometry.attributes.position.needsUpdate = true
   trailGeometry.attributes.color.needsUpdate = true
 
+  for (let c = 0; c < cometCount; c += 1) {
+    const idx = cometIndices[c]
+    const i3 = idx * 3
+    const hostile = hostility[idx] === 1
+    const x = positions[i3]
+    const y = positions[i3 + 1]
+    const z = positions[i3 + 2]
+    const vx = velocities[i3]
+    const vy = velocities[i3 + 1]
+    const vz = velocities[i3 + 2]
+    const speed = Math.hypot(vx, vy, vz)
+    if (speed > 0.0001) {
+      tmpDir.set(vx, vy, vz).normalize()
+    } else {
+      tmpDir.set(x, y, z).normalize()
+    }
+    tmpQuat.setFromUnitVectors(upAxis, tmpDir)
+    const length = THREE.MathUtils.clamp(0.65 + speed * 2.35, 0.65, hostile ? 4.6 : 2.8)
+    const width = hostile ? 0.54 : 0.36
+    tmpObj.position.set(x, y, z)
+    tmpObj.quaternion.copy(tmpQuat)
+    tmpObj.scale.set(width, length, width)
+    tmpObj.updateMatrix()
+    cometMesh.setMatrixAt(c, tmpObj.matrix)
+    if (runtime.state === "attack" || hostile) {
+      cometMesh.setColorAt(c, cometColorAttack)
+    } else if (runtime.state === "defense") {
+      cometMesh.setColorAt(c, cometColorDefense)
+    } else {
+      cometMesh.setColorAt(c, cometColorNormal)
+    }
+  }
+  cometMesh.instanceMatrix.needsUpdate = true
+  if (cometMesh.instanceColor) {
+    cometMesh.instanceColor.needsUpdate = true
+  }
+
   const attackBlend = runtime.state === "attack" ? 1 : runtime.state === "defense" ? 0.7 : 0
   coreUniforms.uThreat.value += (attackBlend - coreUniforms.uThreat.value) * dt * 3.2
+  coreUniforms.uSpike.value = (runtime.state === "attack" ? 0.9 : runtime.state === "defense" ? 0.35 : 0.05) + Math.sin(elapsed * 7.5) * 0.05
   aura.material.color.lerpColors(CORE_SAFE_COLOR, CORE_ALERT_COLOR, attackBlend)
   coreLight.intensity = 4.2 + attackBlend * 2.4
   dynamicColor.copy(attackBlend > 0.35 ? CORE_ALERT_COLOR : CORE_SAFE_COLOR)
@@ -1500,6 +1664,8 @@ const animate = () => {
   shieldUniforms.uColorB.value.set(runtime.state === "defense" ? "#86fff7" : "#6dd8ff")
   shieldParticles.material.opacity = 0.08 + runtime.shieldReveal * 0.88
   shieldParticles.material.size = 0.09 + runtime.shieldReveal * 0.065
+  cometMaterial.opacity = 0.62 + attackBlend * 0.28
+  trailLines.material.opacity = 0.3 + attackBlend * 0.22
   if (runtime.state === "defense") {
     shieldParticles.material.color.lerp(CORE_DEFENSE_COLOR, 0.06)
     accretionRing.material.emissive.lerp(CORE_DEFENSE_COLOR, 0.15)
@@ -1514,6 +1680,17 @@ const animate = () => {
     ray.material.opacity = rayBaseOpacity * flicker
     ray.material.color.set(attackBlend > 0.4 ? "#ff6d96" : runtime.state === "defense" ? "#ff8ab8" : "#8defff")
     ray.material.rotation += dt * 0.13 * (i % 2 === 0 ? 1 : -1)
+  }
+  volumetricGroup.rotation.y += dt * (runtime.state === "attack" ? 0.45 : 0.18)
+  for (let i = 0; i < volumetricShafts.length; i += 1) {
+    const shaft = volumetricShafts[i]
+    const offset = shaft.userData.offset
+    const wave = Math.sin(elapsed * (2.5 + i * 0.2) + shaft.userData.twist)
+    shaft.position.set(offset.x * 0.28, 2.6 + wave * 0.6, offset.z * 0.28)
+    shaft.lookAt(camera.position.x + offset.x, camera.position.y + offset.y, camera.position.z + offset.z)
+    shaft.rotateX(Math.PI / 2)
+    shaft.material.opacity = (0.08 + attackBlend * 0.22 + runtime.shieldReveal * 0.08) * (0.8 + wave * 0.25)
+    shaft.material.color.set(attackBlend > 0.45 ? "#ff5a84" : runtime.state === "defense" ? "#ff8cb4" : "#9af2ff")
   }
 
   raycaster.setFromCamera(pointer, camera)
