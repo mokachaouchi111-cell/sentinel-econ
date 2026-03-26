@@ -7,6 +7,8 @@ const GALAXY_RADIUS = 82
 const SHIELD_RADIUS = 14
 const CORE_SWIRL_COUNT = cpuCores <= 4 ? 900 : 1500
 const SHIELD_PARTICLE_COUNT = cpuCores <= 4 ? 1500 : 2600
+const TRAIL_COUNT = cpuCores <= 4 ? 750 : 1300
+const GOD_RAY_COUNT = cpuCores <= 4 ? 5 : 8
 const NATURAL_COLOR = new THREE.Color("#42d9ff")
 const CORE_SAFE_COLOR = new THREE.Color("#2fd5ff")
 const CORE_ALERT_COLOR = new THREE.Color("#ff244d")
@@ -94,14 +96,53 @@ const particles = new THREE.Points(
 )
 scene.add(particles)
 
+const coreUniforms = {
+  uTime: { value: 0 },
+  uThreat: { value: 0 },
+  uColorSafe: { value: new THREE.Color("#050914") },
+  uColorAttack: { value: new THREE.Color("#2a0b13") },
+}
+
 const core = new THREE.Mesh(
-  new THREE.SphereGeometry(3.2, 40, 40),
-  new THREE.MeshStandardMaterial({
-    color: "#04070f",
-    metalness: 0.08,
-    roughness: 0.35,
-    emissive: "#071124",
-    emissiveIntensity: 0.95,
+  new THREE.SphereGeometry(3.2, 64, 64),
+  new THREE.ShaderMaterial({
+    uniforms: coreUniforms,
+    vertexShader: `
+      uniform float uTime;
+      uniform float uThreat;
+      varying float vWave;
+      varying vec3 vNormalDir;
+      varying vec3 vViewDir;
+      void main() {
+        float n1 = sin((position.x + uTime * 1.5) * 3.3);
+        float n2 = sin((position.y - uTime * 1.2) * 4.2);
+        float n3 = sin((position.z + uTime * 1.8) * 5.1);
+        float wave = (n1 + n2 + n3) / 3.0;
+        float amp = 0.07 + uThreat * 0.24;
+        vec3 displaced = position + normal * wave * amp;
+        vec4 worldPos = modelMatrix * vec4(displaced, 1.0);
+        vWave = wave;
+        vNormalDir = normalize(normalMatrix * normal);
+        vViewDir = normalize(cameraPosition - worldPos.xyz);
+        gl_Position = projectionMatrix * viewMatrix * worldPos;
+      }
+    `,
+    fragmentShader: `
+      uniform float uThreat;
+      uniform vec3 uColorSafe;
+      uniform vec3 uColorAttack;
+      varying float vWave;
+      varying vec3 vNormalDir;
+      varying vec3 vViewDir;
+      void main() {
+        float fresnel = pow(1.0 - max(dot(normalize(vNormalDir), normalize(vViewDir)), 0.0), 2.6);
+        float pulse = 0.55 + 0.45 * abs(vWave);
+        vec3 base = mix(uColorSafe, uColorAttack, uThreat * 0.9);
+        vec3 glow = mix(vec3(0.12, 0.35, 0.55), vec3(0.75, 0.12, 0.22), uThreat);
+        vec3 color = base + glow * (fresnel * 1.25 + pulse * 0.35);
+        gl_FragColor = vec4(color, 1.0);
+      }
+    `,
   }),
 )
 scene.add(core)
@@ -193,6 +234,7 @@ const shieldUniforms = {
   uStrength: { value: 0 },
   uReveal: { value: 0 },
   uPulse: { value: 0 },
+  uImpact: { value: 0 },
   uColorA: { value: new THREE.Color("#59d6ff") },
   uColorB: { value: new THREE.Color("#8dfff8") },
   uAttackTint: { value: new THREE.Color("#ff5d86") },
@@ -223,6 +265,7 @@ const shield = new THREE.Mesh(
       uniform float uStrength;
       uniform float uReveal;
       uniform float uPulse;
+      uniform float uImpact;
       uniform vec3 uColorA;
       uniform vec3 uColorB;
       uniform vec3 uAttackTint;
@@ -242,11 +285,13 @@ const shield = new THREE.Mesh(
         float revealMask = 1.0 - smoothstep(uReveal, uReveal + 0.16, dist);
         float shimmer = 0.55 + 0.45 * sin(uTime * 6.5 + vWorldPos.y * 1.5 + vWorldPos.x * 0.7);
         float glitch = step(0.96, sin((vUv.y + uTime * 0.7) * 140.0) * 0.5 + 0.5) * 0.55 * uPulse;
+        float impactWave = sin((dist - uTime * 0.42) * 34.0) * 0.5 + 0.5;
+        impactWave *= uImpact * (1.0 - smoothstep(0.0, 0.95, dist));
         vec3 color = mix(uColorA, uColorB, shimmer);
         color = mix(color, uAttackTint, uPulse * 0.75);
-        float alpha = edge * revealMask * uStrength * (0.5 + shimmer * 0.5 + glitch);
+        float alpha = edge * revealMask * uStrength * (0.48 + shimmer * 0.52 + glitch + impactWave);
         if (alpha < 0.01) discard;
-        gl_FragColor = vec4(color, alpha);
+        gl_FragColor = vec4(color + uAttackTint * impactWave * 0.65, alpha);
       }
     `,
   }),
@@ -294,6 +339,73 @@ const shieldParticles = new THREE.Points(
 shieldParticles.position.y = 0
 scene.add(shieldParticles)
 
+const trailNodeCount = Math.min(TRAIL_COUNT, STAR_COUNT)
+const trailIndices = new Uint32Array(trailNodeCount)
+for (let i = 0; i < trailNodeCount; i += 1) {
+  trailIndices[i] = Math.floor((i / trailNodeCount) * STAR_COUNT)
+}
+
+const trailPositions = new Float32Array(trailNodeCount * 6)
+const trailColors = new Float32Array(trailNodeCount * 6)
+const trailGeometry = new THREE.BufferGeometry()
+trailGeometry.setAttribute("position", new THREE.BufferAttribute(trailPositions, 3).setUsage(THREE.DynamicDrawUsage))
+trailGeometry.setAttribute("color", new THREE.BufferAttribute(trailColors, 3).setUsage(THREE.DynamicDrawUsage))
+const trailLines = new THREE.LineSegments(
+  trailGeometry,
+  new THREE.LineBasicMaterial({
+    transparent: true,
+    opacity: 0.42,
+    blending: THREE.AdditiveBlending,
+    vertexColors: true,
+    depthWrite: false,
+  }),
+)
+scene.add(trailLines)
+
+const makeRayTexture = () => {
+  const canvas = document.createElement("canvas")
+  canvas.width = 64
+  canvas.height = 256
+  const ctx = canvas.getContext("2d")
+  if (!ctx) {
+    return null
+  }
+  const gradient = ctx.createLinearGradient(32, 0, 32, 256)
+  gradient.addColorStop(0, "rgba(170,240,255,0)")
+  gradient.addColorStop(0.2, "rgba(170,240,255,0.35)")
+  gradient.addColorStop(0.65, "rgba(170,240,255,0.12)")
+  gradient.addColorStop(1, "rgba(170,240,255,0)")
+  ctx.fillStyle = gradient
+  ctx.fillRect(0, 0, 64, 256)
+  const texture = new THREE.CanvasTexture(canvas)
+  texture.needsUpdate = true
+  return texture
+}
+
+const rayTexture = makeRayTexture()
+const godRayGroup = new THREE.Group()
+const godRays = []
+if (rayTexture) {
+  for (let i = 0; i < GOD_RAY_COUNT; i += 1) {
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: rayTexture,
+        color: "#8defff",
+        transparent: true,
+        opacity: 0.17,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    )
+    sprite.scale.set(20 + Math.random() * 12, 74 + Math.random() * 36, 1)
+    sprite.position.set((Math.random() - 0.5) * 5, 2 + Math.random() * 2, (Math.random() - 0.5) * 5)
+    sprite.material.rotation = Math.random() * Math.PI
+    godRayGroup.add(sprite)
+    godRays.push(sprite)
+  }
+}
+scene.add(godRayGroup)
+
 const hud = {
   state: document.getElementById("hud-state"),
   threat: document.getElementById("hud-threat"),
@@ -333,6 +445,7 @@ const runtime = {
   explosionIntensity: 0.03,
   shieldStrength: 0,
   shieldReveal: 0,
+  shieldImpact: 0,
   dataAgeMs: 0,
   attackElapsed: 0,
   scenarioRunning: false,
@@ -1074,6 +1187,7 @@ const animate = () => {
   const dt = Math.min(0.05, clock.getDelta())
   const elapsed = clock.getElapsedTime()
   runtime.attackElapsed += dt
+  coreUniforms.uTime.value = elapsed
 
   maybeRunOfflineMotion(dt)
 
@@ -1089,12 +1203,14 @@ const animate = () => {
 
   const shieldTarget = THREE.MathUtils.clamp(runtime.shieldStrength, 0, 1)
   runtime.shieldReveal += (shieldTarget - runtime.shieldReveal) * dt * 3.6
+  runtime.shieldImpact = Math.max(0, runtime.shieldImpact - dt * 1.6)
   const shieldPulse = 1 + Math.sin(elapsed * (runtime.state === "defense" ? 9 : 3.2)) * 0.03
   shield.scale.setScalar(0.85 + runtime.shieldReveal * 0.25 * shieldPulse)
   shieldUniforms.uTime.value = elapsed
   shieldUniforms.uStrength.value = runtime.shieldReveal
   shieldUniforms.uReveal.value = 0.72 - runtime.shieldReveal * 0.72
   shieldUniforms.uPulse.value = runtime.state === "defense" ? 1 : runtime.state === "attack" ? 0.4 : 0.12
+  shieldUniforms.uImpact.value = runtime.shieldImpact
 
   cameraControl.idleSeconds += dt
   if (!cameraControl.dragging && cameraControl.idleSeconds > 1.4) {
@@ -1198,6 +1314,7 @@ const animate = () => {
       } else if (runtime.state === "defense") {
         const len = Math.hypot(x, y, z) || 1
         if (len < SHIELD_RADIUS + 0.8) {
+          runtime.shieldImpact = Math.min(1, runtime.shieldImpact + 0.18)
           const nx = x / len
           const ny = y / len
           const nz = z / len
@@ -1256,7 +1373,40 @@ const animate = () => {
     velocities[i3 + 2] = vz
   }
 
+  for (let t = 0; t < trailNodeCount; t += 1) {
+    const idx = trailIndices[t]
+    const i3 = idx * 3
+    const t6 = t * 6
+    const hostile = hostility[idx] === 1
+    const x = positions[i3]
+    const y = positions[i3 + 1]
+    const z = positions[i3 + 2]
+    const vx = velocities[i3]
+    const vy = velocities[i3 + 1]
+    const vz = velocities[i3 + 2]
+    const tailScale = hostile ? 3.4 : 1.5
+    trailPositions[t6] = x
+    trailPositions[t6 + 1] = y
+    trailPositions[t6 + 2] = z
+    trailPositions[t6 + 3] = x - vx * tailScale
+    trailPositions[t6 + 4] = y - vy * tailScale
+    trailPositions[t6 + 5] = z - vz * tailScale
+
+    const r = hostile ? 1 : 0.35
+    const g = hostile ? 0.32 : 0.88
+    const b = hostile ? 0.1 : 1
+    trailColors[t6] = r
+    trailColors[t6 + 1] = g
+    trailColors[t6 + 2] = b
+    trailColors[t6 + 3] = r * 0.22
+    trailColors[t6 + 4] = g * 0.22
+    trailColors[t6 + 5] = b * 0.22
+  }
+  trailGeometry.attributes.position.needsUpdate = true
+  trailGeometry.attributes.color.needsUpdate = true
+
   const attackBlend = runtime.state === "attack" ? 1 : runtime.state === "defense" ? 0.7 : 0
+  coreUniforms.uThreat.value += (attackBlend - coreUniforms.uThreat.value) * dt * 3.2
   aura.material.color.lerpColors(CORE_SAFE_COLOR, CORE_ALERT_COLOR, attackBlend)
   coreLight.intensity = 4.2 + attackBlend * 2.4
   dynamicColor.copy(attackBlend > 0.35 ? CORE_ALERT_COLOR : CORE_SAFE_COLOR)
@@ -1283,6 +1433,15 @@ const animate = () => {
     accretionRing.material.emissive.lerp(CORE_DEFENSE_COLOR, 0.15)
   } else {
     shieldParticles.material.color.lerp(CORE_SAFE_COLOR, 0.08)
+  }
+  godRayGroup.rotation.y += dt * (runtime.state === "attack" ? 0.55 : 0.24)
+  const rayBaseOpacity = 0.13 + attackBlend * 0.25
+  for (let i = 0; i < godRays.length; i += 1) {
+    const ray = godRays[i]
+    const flicker = 0.75 + Math.sin(elapsed * 3.8 + i * 0.9) * 0.22
+    ray.material.opacity = rayBaseOpacity * flicker
+    ray.material.color.set(attackBlend > 0.4 ? "#ff6d96" : runtime.state === "defense" ? "#ff8ab8" : "#8defff")
+    ray.material.rotation += dt * 0.13 * (i % 2 === 0 ? 1 : -1)
   }
 
   raycaster.setFromCamera(pointer, camera)
