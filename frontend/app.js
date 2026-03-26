@@ -4,8 +4,10 @@ const cpuCores = navigator.hardwareConcurrency || 4
 const STAR_COUNT = cpuCores <= 4 ? 7500 : 12000
 const BRANCHES = 6
 const GALAXY_RADIUS = 82
-const SHIELD_RADIUS = 14
-const CORE_SWIRL_COUNT = cpuCores <= 4 ? 900 : 1500
+const CORE_RADIUS = 4.6
+const SHIELD_RADIUS = 18
+const CORE_SWIRL_COUNT = cpuCores <= 4 ? 1300 : 2300
+const CORE_ORBITAL_COUNT = cpuCores <= 4 ? 1200 : 2100
 const SHIELD_PARTICLE_COUNT = cpuCores <= 4 ? 1500 : 2600
 const TRAIL_COUNT = cpuCores <= 4 ? 750 : 1300
 const GOD_RAY_COUNT = cpuCores <= 4 ? 5 : 8
@@ -27,7 +29,7 @@ const scene = new THREE.Scene()
 scene.fog = new THREE.FogExp2("#050a18", 0.008)
 
 const camera = new THREE.PerspectiveCamera(58, window.innerWidth / window.innerHeight, 0.1, 600)
-camera.position.set(0, 16, 96)
+camera.position.set(0, 15, 82)
 
 const ambient = new THREE.AmbientLight("#6dc8ff", 0.5)
 scene.add(ambient)
@@ -99,12 +101,12 @@ scene.add(particles)
 const coreUniforms = {
   uTime: { value: 0 },
   uThreat: { value: 0 },
-  uColorSafe: { value: new THREE.Color("#050914") },
-  uColorAttack: { value: new THREE.Color("#2a0b13") },
+  uColorSafe: { value: new THREE.Color("#0b1f33") },
+  uColorAttack: { value: new THREE.Color("#5a0e1d") },
 }
 
 const core = new THREE.Mesh(
-  new THREE.SphereGeometry(3.2, 64, 64),
+  new THREE.SphereGeometry(CORE_RADIUS, 72, 72),
   new THREE.ShaderMaterial({
     uniforms: coreUniforms,
     vertexShader: `
@@ -148,7 +150,7 @@ const core = new THREE.Mesh(
 scene.add(core)
 
 const coreShell = new THREE.Mesh(
-  new THREE.SphereGeometry(4.5, 44, 44),
+  new THREE.SphereGeometry(CORE_RADIUS * 1.45, 52, 52),
   new THREE.MeshPhysicalMaterial({
     color: "#7be7ff",
     transparent: true,
@@ -167,7 +169,7 @@ const coreShell = new THREE.Mesh(
 scene.add(coreShell)
 
 const aura = new THREE.Mesh(
-  new THREE.SphereGeometry(5.8, 36, 36),
+  new THREE.SphereGeometry(CORE_RADIUS * 1.95, 42, 42),
   new THREE.MeshBasicMaterial({
     color: CORE_SAFE_COLOR,
     transparent: true,
@@ -188,8 +190,8 @@ const swirlSpeed = new Float32Array(CORE_SWIRL_COUNT)
 for (let i = 0; i < CORE_SWIRL_COUNT; i += 1) {
   const i3 = i * 3
   swirlAngles[i] = Math.random() * Math.PI * 2
-  swirlRadius[i] = 2.8 + Math.pow(Math.random(), 0.55) * 4.8
-  swirlHeight[i] = (Math.random() - 0.5) * 2.6
+  swirlRadius[i] = CORE_RADIUS * 0.8 + Math.pow(Math.random(), 0.58) * 6.4
+  swirlHeight[i] = (Math.random() - 0.5) * 3.4
   swirlSpeed[i] = 0.7 + Math.random() * 1.6
   swirlPositions[i3] = Math.cos(swirlAngles[i]) * swirlRadius[i]
   swirlPositions[i3 + 1] = swirlHeight[i]
@@ -211,8 +213,51 @@ const coreSwirl = new THREE.Points(
 )
 scene.add(coreSwirl)
 
+const coreCage = new THREE.Mesh(
+  new THREE.IcosahedronGeometry(CORE_RADIUS * 1.08, 1),
+  new THREE.MeshBasicMaterial({
+    color: "#94f0ff",
+    wireframe: true,
+    transparent: true,
+    opacity: 0.24,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  }),
+)
+scene.add(coreCage)
+
+const orbitalGeometry = new THREE.BufferGeometry()
+const orbitalPositions = new Float32Array(CORE_ORBITAL_COUNT * 3)
+const orbitalAngles = new Float32Array(CORE_ORBITAL_COUNT)
+const orbitalBands = new Float32Array(CORE_ORBITAL_COUNT)
+const orbitalLift = new Float32Array(CORE_ORBITAL_COUNT)
+const orbitalSpeed = new Float32Array(CORE_ORBITAL_COUNT)
+for (let i = 0; i < CORE_ORBITAL_COUNT; i += 1) {
+  const i3 = i * 3
+  orbitalAngles[i] = Math.random() * Math.PI * 2
+  orbitalBands[i] = CORE_RADIUS * 1.6 + Math.pow(Math.random(), 0.7) * 8.8
+  orbitalLift[i] = (Math.random() - 0.5) * 4.2
+  orbitalSpeed[i] = 0.5 + Math.random() * 1.4
+  orbitalPositions[i3] = Math.cos(orbitalAngles[i]) * orbitalBands[i]
+  orbitalPositions[i3 + 1] = orbitalLift[i]
+  orbitalPositions[i3 + 2] = Math.sin(orbitalAngles[i]) * orbitalBands[i]
+}
+orbitalGeometry.setAttribute("position", new THREE.BufferAttribute(orbitalPositions, 3).setUsage(THREE.DynamicDrawUsage))
+const orbitalDust = new THREE.Points(
+  orbitalGeometry,
+  new THREE.PointsMaterial({
+    color: "#8ef3ff",
+    size: 0.1,
+    transparent: true,
+    opacity: 0.75,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  }),
+)
+scene.add(orbitalDust)
+
 const accretionRing = new THREE.Mesh(
-  new THREE.TorusGeometry(7.6, 0.16, 22, 180),
+  new THREE.TorusGeometry(CORE_RADIUS * 2.25, 0.19, 28, 220),
   new THREE.MeshPhysicalMaterial({
     color: "#6fe8ff",
     transparent: true,
@@ -278,18 +323,22 @@ const shield = new THREE.Mesh(
       }
 
       void main() {
-        vec2 uv = vUv * vec2(20.0, 12.0);
+        vec2 uv = vUv * vec2(26.0, 16.0);
         float cell = hexCell(uv + vec2(sin(uTime * 0.3) * 0.25, cos(uTime * 0.4) * 0.18));
         float edge = 1.0 - smoothstep(0.43, 0.53, cell);
         float dist = length((vUv - vec2(0.5, 0.5)) * vec2(1.2, 1.0));
-        float revealMask = 1.0 - smoothstep(uReveal, uReveal + 0.16, dist);
+        float revealMask = 1.0 - smoothstep(uReveal, uReveal + 0.13, dist);
         float shimmer = 0.55 + 0.45 * sin(uTime * 6.5 + vWorldPos.y * 1.5 + vWorldPos.x * 0.7);
         float glitch = step(0.96, sin((vUv.y + uTime * 0.7) * 140.0) * 0.5 + 0.5) * 0.55 * uPulse;
+        float scan = sin((vUv.y - uTime * 0.9) * 90.0) * 0.5 + 0.5;
+        float radial = sin((dist * 26.0) - uTime * 8.5) * 0.5 + 0.5;
         float impactWave = sin((dist - uTime * 0.42) * 34.0) * 0.5 + 0.5;
         impactWave *= uImpact * (1.0 - smoothstep(0.0, 0.95, dist));
         vec3 color = mix(uColorA, uColorB, shimmer);
         color = mix(color, uAttackTint, uPulse * 0.75);
-        float alpha = edge * revealMask * uStrength * (0.48 + shimmer * 0.52 + glitch + impactWave);
+        vec3 prism = mix(vec3(0.25, 0.7, 1.0), vec3(1.0, 0.45, 0.72), radial * uPulse);
+        color += prism * (0.1 + scan * 0.32);
+        float alpha = edge * revealMask * uStrength * (0.55 + shimmer * 0.58 + glitch + impactWave + radial * 0.22);
         if (alpha < 0.01) discard;
         gl_FragColor = vec4(color + uAttackTint * impactWave * 0.65, alpha);
       }
@@ -459,10 +508,10 @@ const dynamicColor = new THREE.Color()
 const cameraControl = {
   yaw: Math.PI / 2,
   pitch: 0.16,
-  radius: 96,
+  radius: 82,
   targetYaw: Math.PI / 2,
   targetPitch: 0.16,
-  targetRadius: 96,
+  targetRadius: 82,
   dragging: false,
   lastX: 0,
   lastY: 0,
@@ -609,7 +658,7 @@ renderer.domElement.addEventListener(
   "wheel",
   (event) => {
     event.preventDefault()
-    cameraControl.targetRadius = clamp(cameraControl.targetRadius + event.deltaY * 0.06, 48, 155)
+    cameraControl.targetRadius = clamp(cameraControl.targetRadius + event.deltaY * 0.06, 42, 140)
     cameraControl.idleSeconds = 0
   },
   { passive: false },
@@ -618,7 +667,7 @@ renderer.domElement.addEventListener(
 renderer.domElement.addEventListener("dblclick", () => {
   cameraControl.targetYaw = Math.PI / 2
   cameraControl.targetPitch = 0.16
-  cameraControl.targetRadius = 96
+  cameraControl.targetRadius = 82
   cameraControl.idleSeconds = 0
 })
 
@@ -1200,12 +1249,14 @@ const animate = () => {
   coreShell.scale.setScalar(1 + Math.sin(elapsed * (runtime.state === "attack" ? 7.8 : 2.1)) * 0.04)
   coreShell.rotation.y += dt * 0.28
   core.rotation.y += dt * 0.16
+  coreCage.rotation.y += dt * (runtime.state === "attack" ? 0.95 : 0.42)
+  coreCage.rotation.x += dt * 0.22
 
   const shieldTarget = THREE.MathUtils.clamp(runtime.shieldStrength, 0, 1)
   runtime.shieldReveal += (shieldTarget - runtime.shieldReveal) * dt * 3.6
   runtime.shieldImpact = Math.max(0, runtime.shieldImpact - dt * 1.6)
   const shieldPulse = 1 + Math.sin(elapsed * (runtime.state === "defense" ? 9 : 3.2)) * 0.03
-  shield.scale.setScalar(0.85 + runtime.shieldReveal * 0.25 * shieldPulse)
+  shield.scale.setScalar(0.92 + runtime.shieldReveal * 0.2 * shieldPulse)
   shieldUniforms.uTime.value = elapsed
   shieldUniforms.uStrength.value = runtime.shieldReveal
   shieldUniforms.uReveal.value = 0.72 - runtime.shieldReveal * 0.72
@@ -1255,6 +1306,18 @@ const animate = () => {
     swirlPositions[i3 + 2] = Math.sin(swirlAngles[i]) * radius
   }
   swirlGeometry.attributes.position.needsUpdate = true
+
+  const orbitalPhase = runtime.state === "attack" ? 2.05 : runtime.state === "defense" ? 1.55 : 1.05
+  for (let i = 0; i < CORE_ORBITAL_COUNT; i += 1) {
+    const i3 = i * 3
+    orbitalAngles[i] += dt * orbitalSpeed[i] * orbitalPhase
+    const bandPulse = 1 + Math.sin(elapsed * 2.8 + i * 0.013) * 0.08
+    const radius = orbitalBands[i] * bandPulse
+    orbitalPositions[i3] = Math.cos(orbitalAngles[i]) * radius
+    orbitalPositions[i3 + 1] = orbitalLift[i] + Math.sin(orbitalAngles[i] * 1.6 + elapsed * 2.2) * 0.42
+    orbitalPositions[i3 + 2] = Math.sin(orbitalAngles[i]) * radius
+  }
+  orbitalGeometry.attributes.position.needsUpdate = true
 
   const shieldSpin = runtime.state === "defense" ? 1.8 : runtime.state === "attack" ? 1.2 : 0.7
   for (let i = 0; i < SHIELD_PARTICLE_COUNT; i += 1) {
@@ -1417,12 +1480,21 @@ const animate = () => {
   coreShell.material.emissiveIntensity = 0.65 + attackBlend * 0.65
   coreSwirl.material.opacity = 0.72 + attackBlend * 0.2
   coreSwirl.material.size = 0.11 + attackBlend * 0.045
+  coreCage.material.opacity = 0.2 + attackBlend * 0.34 + runtime.shieldReveal * 0.14
+  orbitalDust.material.opacity = 0.66 + attackBlend * 0.23
+  orbitalDust.material.size = 0.09 + attackBlend * 0.045
   if (runtime.state === "attack") {
     coreSwirl.material.color.lerp(CORE_ALERT_COLOR, 0.26)
+    orbitalDust.material.color.lerp(CORE_ALERT_COLOR, 0.18)
+    coreCage.material.color.lerp(CORE_ALERT_COLOR, 0.2)
   } else if (runtime.state === "defense") {
     coreSwirl.material.color.lerp(CORE_DEFENSE_COLOR, 0.2)
+    orbitalDust.material.color.lerp(CORE_DEFENSE_COLOR, 0.14)
+    coreCage.material.color.lerp(CORE_DEFENSE_COLOR, 0.15)
   } else {
     coreSwirl.material.color.lerp(CORE_SAFE_COLOR, 0.16)
+    orbitalDust.material.color.lerp(CORE_SAFE_COLOR, 0.1)
+    coreCage.material.color.lerp(CORE_SAFE_COLOR, 0.1)
   }
   shieldUniforms.uColorA.value.set(runtime.state === "defense" ? "#5cf3ff" : "#4ac8ff")
   shieldUniforms.uColorB.value.set(runtime.state === "defense" ? "#86fff7" : "#6dd8ff")
