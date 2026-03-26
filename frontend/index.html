@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sentinel-Econ | Galactic Network</title>
+    <link rel="stylesheet" href="/frontend/styles.css" />
+  </head>
+  <body>
+    <div id="scene-root"></div>
+
+    <section class="hud top-left">
+      <h1>SENTINEL-ECON</h1>
+      <p class="meta">Active Cyber Defense Digital Twin</p>
+      <div class="row"><span>STATE</span><span id="hud-state">NORMAL</span></div>
+      <div class="row"><span>THREAT</span><span id="hud-threat">Normal Traffic</span></div>
+      <div class="row"><span>MODEL</span><span id="hud-model">Warmup</span></div>
+      <div class="row"><span>AUTO DEFENSE</span><span id="hud-auto">Monitoring</span></div>
+      <div class="row"><span>ACTION</span><span id="hud-action">No action needed</span></div>
+    </section>
+
+    <section class="hud top-right">
+      <h2>NETWORK METRICS</h2>
+      <div class="row"><span>PACKETS / SEC</span><span id="hud-pps">0</span></div>
+      <div class="row"><span>SYN RATIO</span><span id="hud-syn">0.00</span></div>
+      <div class="row"><span>ANOMALY SCORE</span><span id="hud-anomaly">0.00</span></div>
+      <div class="row"><span>CONFIDENCE</span><span id="hud-confidence">0.00</span></div>
+      <div class="row"><span>SCENARIO</span><span id="hud-scenario">Idle</span></div>
+      <div class="row"><span>CONNECTION</span><span id="hud-conn">Connecting</span></div>
+    </section>
+
+    <section class="hud bottom-left">
+      <h2>ECONOMIC IMPACT (DZD)</h2>
+      <div class="row"><span>LOSS / SEC</span><span id="hud-loss-rate">0 DA</span></div>
+      <div class="row"><span>TOTAL LOSS</span><span id="hud-loss-total">0 DA</span></div>
+      <div class="row"><span>ATTACK DURATION</span><span id="hud-attack-time">0s</span></div>
+    </section>
+
+    <section class="hud middle-left feed">
+      <h2>OPERATIONS</h2>
+      <div class="tab-bar">
+        <button class="tab-btn active" data-tab="logs">System Logs</button>
+        <button class="tab-btn" data-tab="terminal">Hacker POV</button>
+      </div>
+      <div class="row"><span>TRAP HITS</span><span id="hud-honeypot-hits">0</span></div>
+      <div class="row"><span>ATTACK EVENTS</span><span id="hud-attacks-count">0</span></div>
+      <div class="row"><span>DEFENSE ACTIONS</span><span id="hud-defense-count">0</span></div>
+      <div id="incident-feed" class="feed-list tab-view active" data-panel="logs"></div>
+      <pre id="terminal-view" class="terminal tab-view" data-panel="terminal"></pre>
+    </section>
+
+    <section class="hud middle-right inspector">
+      <h2>PACKET INSPECTOR</h2>
+      <div class="row"><span>PACKET ID</span><span id="inspect-id">0</span></div>
+      <div class="row"><span>STATUS</span><span id="inspect-status">Normal</span></div>
+      <div class="row"><span>THREAT</span><span id="inspect-threat">Normal Traffic</span></div>
+      <div class="row"><span>PROTO</span><span id="inspect-proto">TCP / -</span></div>
+      <div class="row"><span>SRC</span><span id="inspect-src">0.0.0.0:0</span></div>
+      <div class="row"><span>DST</span><span id="inspect-dst">0.0.0.0:0</span></div>
+      <div class="route-banner" id="inspect-route">Route: production-core</div>
+      <div class="inspect-details" id="inspect-details">Waiting for packet stream...</div>
+      <div class="inspect-hex" id="inspect-hex">n/a</div>
+    </section>
+
+    <section class="hud bottom-right controls">
+      <h2>DEMO CONTROL</h2>
+      <div class="buttons">
+        <button data-mode="attack">Trigger Attack</button>
+        <button data-mode="defense">Defense Mode</button>
+        <button data-mode="recovery">Recovery</button>
+        <button data-mode="normal">Back To Normal</button>
+        <button id="btn-scenario">Launch Auto Scenario</button>
+        <button id="btn-honeypot">Simulate Trap Hit</button>
+        <button id="btn-report" class="report-btn">Generate PDF Report</button>
+      </div>
+    </section>
+
+    <div id="star-tooltip" class="tooltip"></div>
+    <button id="panel-menu-btn" class="panel-menu-btn">Panels</button>
+    <aside id="panel-menu" class="panel-menu">
+      <div class="panel-menu-head">
+        <h3>Command Layout</h3>
+        <button id="panel-menu-close" class="panel-close">x</button>
+      </div>
+      <div id="panel-menu-list" class="panel-menu-list"></div>
+      <button id="panel-focus-btn" class="focus-btn">Focus Mode</button>
+      <button id="panel-reset-btn" class="focus-btn">Reset Layout</button>
+    </aside>
+
+    <script src="/frontend/vendor/socketio/socket.io.min.js"></script>
+    <script src="/frontend/vendor/jspdf/jspdf.umd.min.js"></script>
+    <script type="module" src="/frontend/app.js"></script>
+  </body>
+</html>
